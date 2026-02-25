@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Karbnik AI — Satellite Verification Demo</title>
+<meta name="description" content="AI-powered satellite verification for environmental assets"/>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%230a0f0d'/><text x='16' y='22' text-anchor='middle' font-size='18' fill='%2334d399'>K</text></svg>"/>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:linear-gradient(180deg,#0a0f0d 0%,#0d1a14 100%);min-height:100vh;font-family:system-ui,-apple-system,sans-serif;color:#e2e8f0}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes scanLine{from{top:0}to{top:100%}}
+</style>
+</head>
+<body>
+<div id="app" style="max-width:1100px;margin:0 auto;padding:24px"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" crossorigin></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" crossorigin></script>
+
+<script>
+(function(){
+"use strict";
+var h = React.createElement;
+var useState = React.useState;
+var useEffect = React.useEffect;
+var useCallback = React.useCallback;
+var useRef = React.useRef;
+
+var GS = 32;
+var CS = 14;
+var TOTAL = GS * GS;
+
+var COLORS = {
+  forest: ["#1a472a","#2d6a4f"],
+  clearing: ["#8B9D77","#a3b18a"],
+  degraded: ["#9e4a2f","#c06030"],
+  water: ["#1a3a5c","#264f78"]
+};
+
+function genGrid(){
+  var g = [];
+  for(var y = 0; y < GS; y++){
+    var row = [];
+    for(var x = 0; x < GS; x++){
+      var d = Math.sqrt((x-16)*(x-16) + (y-16)*(y-16));
+      var n = Math.random();
+      var t = "forest";
+      if(d > 14 + n*3) t = "water";
+      else if(d > 12 && n > 0.7) t = "clearing";
+      else if(x > 10 && x < 22 && y > 20 && y < 24 && n > 0.3) t = "degraded";
+      else if(n > 0.92) t = "clearing";
+      row.push({
+        type: t,
+        biomass: t === "forest" ? 60 + Math.random()*40 : t === "degraded" ? 15 + Math.random()*25 : 0,
+        carbon: t === "forest" ? 120 + Math.random()*80 : t === "degraded" ? 30 + Math.random()*40 : 0,
+        anomaly: t === "degraded" ? Math.random() > 0.4 : false
+      });
+    }
+    g.push(row);
+  }
+  return g;
+}
+
+function cellColor(c, ov, an){
+  if(!an) return COLORS[c.type][Math.random() > 0.5 ? 1 : 0];
+  if(ov === "biomass"){
+    if(c.type === "water") return "#0d1f33";
+    var i = c.biomass / 100;
+    return "rgb(" + Math.round(30+(1-i)*180) + "," + Math.round(80+i*175) + "," + Math.round(30+(1-i)*40) + ")";
+  }
+  if(ov === "carbon"){
+    if(c.type === "water") return "#0d1f33";
+    var i2 = c.carbon / 200;
+    return "rgb(20," + Math.round(60+i2*160) + "," + Math.round(80+i2*175) + ")";
+  }
+  if(ov === "anomaly"){
+    if(c.anomaly) return "#ef4444";
+    if(c.type === "degraded") return "#f59e0b";
+    if(c.type === "water") return "#0d1f33";
+    return "#22c55e";
+  }
+  return COLORS[c.type][0];
+}
+
+function Grid(props){
+  var grid = props.grid, overlay = props.overlay, progress = props.progress, active = props.active;
+  var ref = useRef(null);
+
+  useEffect(function(){
+    if(!ref.current) return;
+    var cells = ref.current.querySelectorAll(".gc");
+    for(var y = 0; y < GS; y++){
+      for(var x = 0; x < GS; x++){
+        var idx = y * GS + x;
+        var cell = grid[y][x];
+        var isAn = idx < progress && active;
+        if(cells[idx]) cells[idx].style.backgroundColor = cellColor(cell, overlay, isAn);
+      }
+    }
+  }, [grid, overlay, progress, active]);
+
+  var els = [];
+  for(var y = 0; y < GS; y++){
+    for(var x = 0; x < GS; x++){
+      var cell = grid[y][x];
+      var idx = y * GS + x;
+      var kids = [];
+      if(cell.anomaly){
+        kids.push(h("div", {
+          key: "a",
+          style: {
+            position:"absolute", inset:"2px",
+            border:"2px solid #fbbf24", borderRadius:"2px",
+            animation:"pulse 1.5s infinite",
+            display: (idx < progress && active && overlay === "anomaly") ? "block" : "none"
+          }
+        }));
+      }
+      els.push(h("div", {
+        key: idx,
+        className: "gc",
+        style: {width:CS, height:CS, position:"relative"}
+      }, kids));
+    }
+  }
+
+  return h("div", {
+    ref: ref,
+    style: {
+      display:"inline-grid",
+      gridTemplateColumns: "repeat(" + GS + "," + CS + "px)",
+      gap:"1px", background:"#000",
+      borderRadius:"8px", overflow:"hidden",
+      border:"2px solid #1a472a",
+      position:"relative"
+    }
+  },
+    (active && progress < TOTAL) ? h("div", {style:{
+      position:"absolute", top:0, left:0, right:0, height:"3px",
+      background:"linear-gradient(90deg,transparent,#34d39988,transparent)",
+      pointerEvents:"none", animation:"scanLine 2s linear infinite", zIndex:1
+    }}) : null,
+    els
+  );
+}
+
+function Metric(props){
+  var vis = useState(false);
+  var visible = vis[0], setVisible = vis[1];
+  useEffect(function(){
+    var t = setTimeout(function(){ setVisible(true); }, props.delay);
+    return function(){ clearTimeout(t); };
+  }, [props.delay]);
+  return h("div", {style:{
+    background:"linear-gradient(135deg,#0f1f15,#162b1e)",
+    borderLeft:"3px solid " + props.color + "33",
+    borderRadius:"10px", padding:"14px 16px",
+    opacity: visible ? 1 : 0,
+    transform: visible ? "translateY(0)" : "translateY(10px)",
+    transition:"all 0.5s ease"
+  }},
+    h("div", {style:{fontSize:"12px",color:"#94a3b8",marginBottom:"4px",display:"flex",alignItems:"center",gap:"6px"}},
+      h("span", null, props.icon), " ", props.label),
+    h("div", {style:{fontSize:"24px",fontWeight:"bold",color:props.color}},
+      props.value,
+      h("span", {style:{fontSize:"12px",fontWeight:"normal",color:"#64748b",marginLeft:"4px"}}, props.unit))
+  );
+}
+
+function Step(props){
+  var cols = {pending:"#475569",running:"#f59e0b",done:"#22c55e"};
+  var icons = {pending:"\u25CB",running:"\u25CC",done:"\u2713"};
+  return h("div", {style:{display:"flex",alignItems:"center",gap:"10px",padding:"6px 0"}},
+    h("div", {style:{
+      width:24, height:24, borderRadius:"50%",
+      background: props.status === "done" ? cols[props.status]+"22" : "transparent",
+      border:"2px solid " + (cols[props.status] || "#475569"),
+      display:"flex", alignItems:"center", justifyContent:"center",
+      fontSize:"12px", fontWeight:"bold",
+      color: cols[props.status] || "#475569",
+      animation: props.status === "running" ? "spin 1s linear infinite" : "none",
+      flexShrink:0
+    }}, icons[props.status] || "\u25CB"),
+    h("div", {style:{flex:1}},
+      h("div", {style:{fontSize:"13px",fontWeight:600,color:props.status==="pending"?"#64748b":"#e2e8f0"}}, props.label),
+      props.detail ? h("div", {style:{fontSize:"11px",color:"#64748b"}}, props.detail) : null
+    )
+  );
+}
+
+function App(){
+  var gridState = useState(function(){ return genGrid(); });
+  var grid = gridState[0];
+
+  var stageState = useState("idle");
+  var stage = stageState[0], setStage = stageState[1];
+
+  var overlayState = useState("natural");
+  var overlay = overlayState[0], setOverlay = overlayState[1];
+
+  var progressState = useState(0);
+  var progress = progressState[0], setProgress = progressState[1];
+
+  var metricsState = useState(null);
+  var metrics = metricsState[0], setMetrics = metricsState[1];
+
+  var initSteps = [
+    {id:1, label:"Satellite Image Capture", status:"pending", detail:"Sentinel-2 + Planet Labs"},
+    {id:2, label:"AI Biomass Detection", status:"pending", detail:"Computer Vision MRV"},
+    {id:3, label:"Carbon Estimation Model", status:"pending", detail:"tCO\u2082e calculation"},
+    {id:4, label:"Anomaly Detection", status:"pending", detail:"Deforestation & phantom credits"},
+    {id:5, label:"Immutable Data Record", status:"pending", detail:"On-chain verification hash"}
+  ];
+
+  var stepsState = useState(initSteps);
+  var steps = stepsState[0], setSteps = stepsState[1];
+
+  function upStep(id, s, d){
+    setSteps(function(prev){
+      return prev.map(function(v){ return v.id === id ? {id:v.id, label:v.label, status:s, detail:d||v.detail} : v; });
+    });
+  }
+
+  var reset = useCallback(function(){
+    setStage("idle"); setOverlay("natural"); setProgress(0); setMetrics(null);
+    setSteps([
+      {id:1, label:"Satellite Image Capture", status:"pending", detail:"Sentinel-2 + Planet Labs"},
+      {id:2, label:"AI Biomass Detection", status:"pending", detail:"Computer Vision MRV"},
+      {id:3, label:"Carbon Estimation Model", status:"pending", detail:"tCO\u2082e calculation"},
+      {id:4, label:"Anomaly Detection", status:"pending", detail:"Deforestation & phantom credits"},
+      {id:5, label:"Immutable Data Record", status:"pending", detail:"On-chain verification hash"}
+    ]);
+  }, []);
+
+  var run = useCallback(function(){
+    setStage("analyzing");
+    var p = 0;
+    upStep(1, "running");
+
+    setTimeout(function(){
+      upStep(1, "done", "4 bands captured @ 10m resolution");
+      upStep(2, "running");
+      setOverlay("biomass");
+
+      var iv = setInterval(function(){
+        p += Math.floor(TOTAL / 25);
+        if(p >= TOTAL){
+          p = TOTAL;
+          clearInterval(iv);
+          upStep(2, "done", "892 forest cells classified");
+
+          setTimeout(function(){
+            upStep(3, "running");
+            setOverlay("carbon");
+
+            setTimeout(function(){
+              upStep(3, "done", "47,832 tCO\u2082e estimated");
+              upStep(4, "running");
+              setOverlay("anomaly");
+
+              setTimeout(function(){
+                upStep(4, "done", "3 anomalies flagged \u2014 degraded zone");
+                upStep(5, "running");
+
+                setTimeout(function(){
+                  upStep(5, "done", "Hash: 0x7f3a...e82d recorded");
+                  setStage("complete");
+                  setMetrics({
+                    biomass:"12,847", carbon:"47,832",
+                    anomalies:"3", confidence:"94.2", verification:"PASSED"
+                  });
+                }, 1200);
+              }, 1500);
+            }, 1500);
+          }, 1200);
+        }
+        setProgress(p);
+      }, 60);
+    }, 1000);
+  }, []);
+
+  var ovs = [
+    {k:"natural",l:"Natural",c:"#22c55e"},
+    {k:"biomass",l:"Biomass",c:"#84cc16"},
+    {k:"carbon",l:"Carbon",c:"#06b6d4"},
+    {k:"anomaly",l:"Anomaly",c:"#ef4444"}
+  ];
+
+  return h("div", null,
+    // Header
+    h("div", {style:{display:"flex",alignItems:"center",gap:"12px",marginBottom:"6px"}},
+      h("div", {style:{fontSize:"28px",fontWeight:800,letterSpacing:"3px",color:"#34d399"}}, "KARBNIK AI"),
+      h("div", {style:{background:"#22c55e22",border:"1px solid #22c55e44",borderRadius:"20px",padding:"3px 12px",fontSize:"11px",color:"#34d399",fontWeight:600}}, "LIVE DEMO")
+    ),
+    h("div", {style:{fontSize:"14px",color:"#64748b",marginBottom:"24px"}}, "Satellite AI Verification \u2014 Environmental Intelligence System of Record"),
+
+    // Main layout
+    h("div", {style:{display:"flex",gap:"24px",flexWrap:"wrap"}},
+
+      // Left: Satellite grid
+      h("div", {style:{flex:"0 0 auto"}},
+        h("div", {style:{background:"#0f1f15",borderRadius:"12px",padding:"16px",border:"1px solid #1a472a55"}},
+          h("div", {style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:"12px"}},
+            h("div", {style:{fontSize:"11px",color:"#64748b",textTransform:"uppercase",letterSpacing:"1px"}}, "REDD+ Project \u2014 Amaz\u00f4nia, Brazil \u2022 2,400 ha"),
+            h("div", {style:{fontSize:"10px",color:"#475569"}}, "Sentinel-2 | 10m/px")
+          ),
+          h(Grid, {grid:grid, overlay:overlay, progress:progress, active:stage !== "idle"}),
+          h("div", {style:{display:"flex",gap:"6px",marginTop:"12px",justifyContent:"center"}},
+            ovs.map(function(o){
+              var isActive = overlay === o.k;
+              return h("button", {
+                key: o.k,
+                onClick: function(){ if(stage !== "idle") setOverlay(o.k); },
+                style: {
+                  background: isActive ? o.c+"22" : "transparent",
+                  border: "1px solid " + (isActive ? o.c : "#334155"),
+                  borderRadius:"6px", padding:"4px 12px", fontSize:"11px",
+                  color: isActive ? o.c : "#64748b",
+                  cursor: stage !== "idle" ? "pointer" : "default",
+                  fontWeight: isActive ? 600 : 400
+                }
+              }, o.l);
+            })
+          )
+        )
+      ),
+
+      // Right: Pipeline + buttons
+      h("div", {style:{flex:1,minWidth:"300px"}},
+        h("div", {style:{background:"#0f1f15",borderRadius:"12px",padding:"20px",border:"1px solid #1a472a55",marginBottom:"16px"}},
+          h("div", {style:{fontSize:"13px",fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"1px",marginBottom:"14px"}}, "Verification Pipeline"),
+          steps.map(function(s){ return h(Step, {key:s.id, label:s.label, status:s.status, detail:s.detail}); })
+        ),
+        stage === "idle" ? h("button", {
+          onClick: run,
+          style:{
+            width:"100%", padding:"14px",
+            background:"linear-gradient(135deg,#059669,#10b981)",
+            border:"none", borderRadius:"10px", color:"#fff",
+            fontSize:"15px", fontWeight:700, cursor:"pointer",
+            letterSpacing:"0.5px", boxShadow:"0 4px 20px #05966944"
+          }
+        }, "\u25b6 Run AI Verification") : null,
+        stage === "complete" ? h("button", {
+          onClick: reset,
+          style:{
+            width:"100%", padding:"12px", background:"transparent",
+            border:"1px solid #334155", borderRadius:"10px",
+            color:"#94a3b8", fontSize:"13px", fontWeight:600, cursor:"pointer"
+          }
+        }, "\u21ba Reset Demo") : null
+      )
+    ),
+
+    // Results
+    metrics ? h("div", {style:{marginTop:"20px",animation:"fadeUp 0.5s ease"}},
+      h("div", {style:{fontSize:"13px",fontWeight:700,color:"#94a3b8",textTransform:"uppercase",letterSpacing:"1px",marginBottom:"12px"}}, "Verification Results"),
+      h("div", {style:{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:"12px"}},
+        h(Metric, {label:"Biomass Detected",value:metrics.biomass,unit:"tons",icon:"\ud83c\udf3f",color:"#22c55e",delay:0}),
+        h(Metric, {label:"Carbon Estimated",value:metrics.carbon,unit:"tCO\u2082e",icon:"\ud83c\udf0d",color:"#06b6d4",delay:200}),
+        h(Metric, {label:"Anomalies Flagged",value:metrics.anomalies,unit:"zones",icon:"\u26a0\ufe0f",color:"#f59e0b",delay:400}),
+        h(Metric, {label:"Model Confidence",value:metrics.confidence,unit:"%",icon:"\ud83c\udfaf",color:"#8b5cf6",delay:600}),
+        h(Metric, {label:"Verification Status",value:metrics.verification,unit:"",icon:"\u2713",color:"#22c55e",delay:800})
+      ),
+      h("div", {style:{marginTop:"16px",background:"#0f1f15",borderRadius:"10px",padding:"14px 18px",border:"1px solid #1a472a55",display:"flex",alignItems:"center",gap:"12px"}},
+        h("div", {style:{width:8,height:8,borderRadius:"50%",background:"#22c55e",animation:"pulse 2s infinite",flexShrink:0}}),
+        h("div", {style:{fontSize:"12px",color:"#64748b"}},
+          h("span", {style:{color:"#34d399",fontWeight:600}}, "Recorded on-chain"),
+          " \u2014 Hash: 0x7f3a8b2c...e82d | Block: #18,847,231 | Timestamp: " + new Date().toISOString().split("T")[0]
+        )
+      )
+    ) : null
+  );
+}
+
+// Mount with React 18 createRoot API
+var root = ReactDOM.createRoot(document.getElementById("app"));
+root.render(h(App));
+
+})();
+</script>
+</body>
+</html>
